@@ -4,31 +4,40 @@ from agents.tutor_agent import explain_topic
 from agents.quiz_agent import generate_quiz
 from agents.evaluator_agent import evaluate_answer
 from agents.feedback_agent import give_feedback
+from ui.hitl import human_in_loop_evaluation
 from ui.chat_agent import chat_with_tutor
 from memory.progress_memory import ProgressMemory
 
-# Initialize memory
-memory = ProgressMemory()
+# ---------------- MEMORY ----------------
+if "memory" not in st.session_state:
+    st.session_state.memory = ProgressMemory()
 
-# Streamlit page setup
-st.set_page_config(
-    page_title="AI Multi-Agent Tutor",
-    layout="wide"
-)
+memory = st.session_state.memory
 
-st.title("🤖 AI Multi-Agent Tutor")
+# ---------------- PAGE ----------------
+st.set_page_config(page_title="AI Tutor", layout="wide")
+st.title("🤖 AI Multi-Agent Tutor (HITL)")
 
-# Session state
+# ---------------- SESSION ----------------
 if "quiz_questions" not in st.session_state:
     st.session_state.quiz_questions = []
 
 if "current_question" not in st.session_state:
     st.session_state.current_question = 0
 
-if "history" not in st.session_state:
-    st.session_state.history = []
+if "submitted" not in st.session_state:
+    st.session_state.submitted = False
 
-# Sidebar navigation
+if "last_eval" not in st.session_state:
+    st.session_state.last_eval = None
+
+if "show_next" not in st.session_state:
+    st.session_state.show_next = False
+
+if "chat_history" not in st.session_state:
+    st.session_state.chat_history = []
+
+# ---------------- SIDEBAR ----------------
 menu = st.sidebar.selectbox(
     "Navigation",
     ["Lesson", "Quiz", "Chat Tutor", "Progress"]
@@ -36,107 +45,190 @@ menu = st.sidebar.selectbox(
 
 topic = st.sidebar.text_input("Enter Topic")
 
-# -----------------------
-# LESSON PAGE
-# -----------------------
-
+# ---------------- LESSON ----------------
 if menu == "Lesson":
 
-    st.header("📘 AI Lesson Generator")
+    st.header("📘 Lesson")
 
     if st.button("Generate Lesson"):
+        st.write(explain_topic(topic))
 
-        explanation = explain_topic(topic)
-
-        st.subheader("Explanation")
-        st.write(explanation)
-
-# -----------------------
-# QUIZ PAGE
-# -----------------------
-
+# ---------------- QUIZ ----------------
 elif menu == "Quiz":
 
     st.header("🧠 Quiz")
 
+    # Restart
+    if st.button("🔄 Restart Quiz"):
+        st.session_state.quiz_questions = []
+        st.session_state.current_question = 0
+        st.session_state.submitted = False
+        st.session_state.last_eval = None
+        st.session_state.show_next = False
+
+        memory.total_questions = 0
+        memory.correct_answers = 0
+
+        st.rerun()
+
+    # Start
     if st.button("Start Quiz"):
 
         quiz_text = generate_quiz(topic)
-
         questions = quiz_text.split("Question")[1:]
 
         st.session_state.quiz_questions = questions
         st.session_state.current_question = 0
+        st.session_state.submitted = False
+        st.session_state.last_eval = None
+        st.session_state.show_next = False
+
+        memory.total_questions = 0
+        memory.correct_answers = 0
 
     if st.session_state.quiz_questions:
 
         q_index = st.session_state.current_question
+        total_q = len(st.session_state.quiz_questions)
 
-        if q_index < len(st.session_state.quiz_questions):
+        if q_index < total_q:
 
-            question_block = "Question" + st.session_state.quiz_questions[q_index]
-            question_only = question_block.split("Correct Answer")[0]
+            # Progress bar
+            st.progress(q_index / total_q, text=f"Question {q_index + 1} of {total_q}")
+
+            # Live score
+            stats_live = memory.stats()
+            st.info(f"Score: {stats_live['correct']} / {stats_live['attempted']}")
+
+            block = "Question" + st.session_state.quiz_questions[q_index]
+            question_only = block.split("Correct Answer")[0]
 
             st.subheader(f"Question {q_index + 1}")
-
             st.write(question_only)
 
             user_answer = st.radio(
-                "Select your answer",
-                ["A", "B", "C", "D"]
+                "Choose answer",
+                ["A", "B", "C", "D"],
+                key=f"answer_{q_index}"
             )
 
-            if st.button("Submit Answer"):
+            # Submit
+            if not st.session_state.submitted:
 
-                evaluation = evaluate_answer(question_only, user_answer)
+                if st.button("Submit Answer"):
 
-                st.subheader("Evaluation")
-                st.write(evaluation)
+                    ai_eval = evaluate_answer(question_only, user_answer)
 
-                feedback = give_feedback(topic, evaluation)
+                    st.session_state.last_eval = ai_eval
+                    st.session_state.submitted = True
+                    st.session_state.show_next = False
 
-                st.subheader("Feedback")
-                st.write(feedback)
+            # Evaluation
+            if st.session_state.submitted and st.session_state.last_eval:
 
-                correct = "Correct" in evaluation
-                memory.update(correct)
+                ai_eval = st.session_state.last_eval
 
-                st.session_state.current_question += 1
+                st.subheader("🤖 AI Evaluation")
+                st.write(f"Result: {ai_eval['result']}")
+                st.write(f"Confidence: {ai_eval['confidence']}")
+                st.write(f"Explanation: {ai_eval['explanation']}")
+
+                # AI Feedback
+                ai_feedback = give_feedback(topic, ai_eval)
+                st.subheader("📘 AI Feedback")
+                st.write(ai_feedback)
+
+                # Smart HITL
+                if ai_eval["confidence"] in ["Low", "Medium"]:
+
+                    hitl = human_in_loop_evaluation(
+                        question_only,
+                        user_answer,
+                        ai_eval,
+                        q_index
+                    )
+
+                    final_result = hitl["result"]
+                    final_feedback = hitl["feedback"]
+
+                else:
+                    st.success("High confidence — auto accepted")
+                    final_result = ai_eval["result"]
+                    final_feedback = ai_eval["explanation"]
+
+                st.subheader("🧑 Final Decision")
+                st.write(final_result)
+
+                st.subheader("📝 Final Feedback")
+                st.write(final_feedback)
+
+                correct = final_result == "Correct"
+
+                if not st.session_state.show_next:
+                    memory.update(correct)
+                    st.session_state.show_next = True
+
+                # Next
+                if st.button("➡️ Next Question"):
+
+                    st.session_state.current_question += 1
+                    st.session_state.submitted = False
+                    st.session_state.last_eval = None
+                    st.session_state.show_next = False
+
+                    st.rerun()
 
         else:
+            st.success("🎉 Quiz Completed")
 
-            st.success("Quiz Completed!")
+            stats = memory.stats()
 
-# -----------------------
-# CHAT TUTOR
-# -----------------------
+            st.write("### Final Score")
+            st.write(f"Correct: {stats['correct']}")
+            st.write(f"Total: {stats['attempted']}")
+            st.write(f"Accuracy: {stats['accuracy']}%")
 
+            if stats["accuracy"] >= 80:
+                st.success("Excellent performance!")
+            elif stats["accuracy"] >= 50:
+                st.warning("Good, but can improve.")
+            else:
+                st.error("Needs improvement. Review concepts.")
+
+            if stats["accuracy"] < 60:
+                st.info("Suggestion: Revise this topic or use Chat Tutor.")
+
+# ---------------- CHAT ----------------
 elif menu == "Chat Tutor":
 
-    st.header("💬 Ask AI Tutor")
+    st.header("💬 Chat with AI Tutor")
 
-    user_question = st.text_input("Ask a question")
+    user_question = st.text_input("Ask your question")
 
-    if st.button("Ask Tutor"):
+    if st.button("Ask"):
 
-        answer, st.session_state.history = chat_with_tutor(
+        answer, st.session_state.chat_history = chat_with_tutor(
             user_question,
             topic,
-            st.session_state.history
+            st.session_state.chat_history
         )
 
         st.write(answer)
 
-# -----------------------
-# PROGRESS PAGE
-# -----------------------
-
+# ---------------- PROGRESS ----------------
 elif menu == "Progress":
 
-    st.header("📊 Learning Progress")
+    st.header("📊 Progress")
 
     stats = memory.stats()
 
-    st.metric("Questions Attempted", stats["attempted"])
-    st.metric("Correct Answers", stats["correct"])
-    st.metric("Accuracy", f"{stats['accuracy']}%")
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        st.metric("Questions Attempted", stats["attempted"])
+
+    with col2:
+        st.metric("Correct Answers", stats["correct"])
+
+    with col3:
+        st.metric("Accuracy (%)", stats["accuracy"])

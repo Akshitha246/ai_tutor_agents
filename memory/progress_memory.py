@@ -14,12 +14,16 @@ class ProgressMemory:
     def stats(self):
 
         if self.total_questions == 0:
-            return "No questions answered yet."
+            return {
+                "attempted": 0,
+                "correct": 0,
+                "accuracy": 0
+            }
 
         accuracy = (self.correct_answers / self.total_questions) * 100
 
-        return f"""
-Questions Attempted: {self.total_questions}
-Correct Answers: {self.correct_answers}
-Accuracy: {accuracy:.2f}%
-"""
+        return {
+            "attempted": self.total_questions,
+            "correct": self.correct_answers,
+            "accuracy": round(accuracy, 2)
+        }

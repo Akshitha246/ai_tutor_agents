@@ -2,22 +2,41 @@ import ollama
 
 def explain_topic(topic):
 
-    prompt = f"""
-You are an AI tutor.
+    if not topic or topic.strip() == "":
+        return "Please enter a valid topic."
 
-Explain the topic clearly.
+    prompt = f"""
+You are an expert AI tutor.
+
+Teach the topic in a clear, structured, and engaging way.
 
 Topic: {topic}
 
-Include:
-1. Simple explanation
-2. Example
-3. Key takeaway
+Follow this format strictly:
+
+1. Simple Explanation:
+Explain in easy terms.
+
+2. Example:
+Give a real-world or intuitive example.
+
+3. Key Takeaways:
+- Point 1
+- Point 2
+- Point 3
+
+Keep it concise but informative.
 """
 
     response = ollama.chat(
         model="llama3",
-        messages=[{"role":"user","content":prompt}]
+        messages=[{"role": "user", "content": prompt}]
     )
 
-    return response["message"]["content"]
+    content = response["message"]["content"]
+
+    # Safety fallback
+    if not content:
+        return "Unable to generate explanation. Try again."
+
+    return content.strip()
