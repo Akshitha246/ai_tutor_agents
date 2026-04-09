@@ -3,12 +3,13 @@ import json
 import re
 import numpy as np
 
-from sklearn.model_selection import train_test_split, cross_val_score
+from sklearn.model_selection import train_test_split
 from sklearn.metrics import (
     accuracy_score,
     precision_score,
     recall_score,
     f1_score,
+    confusion_matrix,
     mean_squared_error,
     r2_score
 )
@@ -18,22 +19,27 @@ from sklearn.tree import DecisionTreeClassifier
 from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
 from sklearn.svm import SVR
 
-# ---------------- HELPER ----------------
+from plot_results import plot_accuracy, plot_confusion_matrix
+
+
+# ---------- HELPERS ----------
 def extract_option(text):
     text = text.strip().upper()
     match = re.search(r'[ABCD]', text)
     return match.group() if match else ""
 
+
 def encode_label(label):
     return {"A": 0, "B": 1, "C": 2, "D": 3}.get(label, -1)
 
-# ---------------- LLM EVALUATION ----------------
+
+# ---------- LLM ----------
 def llm_evaluation(data):
 
     y_true = []
     y_pred = []
 
-    print("\n===== LLM (LLAMA3) EVALUATION =====\n")
+    print("\n===== LLM EVALUATION =====\n")
 
     for i, item in enumerate(data, start=1):
 
@@ -61,39 +67,53 @@ Reply ONLY A/B/C/D
 
         print(f"Q{i}: Pred={pred} | Actual={actual}")
 
+    acc = accuracy_score(y_true, y_pred)
+    prec = precision_score(y_true, y_pred, average='weighted', zero_division=0)
+    rec = recall_score(y_true, y_pred, average='weighted', zero_division=0)
+    f1 = f1_score(y_true, y_pred, average='weighted', zero_division=0)
+
+    cm = confusion_matrix(y_true, y_pred)
+
     print("\n--- LLM Metrics ---")
-    print("Accuracy :", accuracy_score(y_true, y_pred))
-    print("Precision:", precision_score(y_true, y_pred, average='weighted', zero_division=0))
-    print("Recall   :", recall_score(y_true, y_pred, average='weighted', zero_division=0))
-    print("F1 Score :", f1_score(y_true, y_pred, average='weighted', zero_division=0))
+    print(f"Accuracy : {acc:.2f}")
+    print(f"Precision: {prec:.2f}")
+    print(f"Recall   : {rec:.2f}")
+    print(f"F1 Score : {f1:.2f}")
 
-    return np.array(y_true)
+    return np.array(y_true), acc, cm
 
 
-# ---------------- ML CLASSIFICATION ----------------
+# ---------- CLASSIFICATION ----------
 def classification_models(X, y):
 
-    print("\n===== CLASSIFICATION MODELS =====\n")
+    results = {}
 
     X_train, X_test, y_train, y_test = train_test_split(
         X, y, test_size=0.2, random_state=42
     )
 
     models = {
-        "Logistic Regression": LogisticRegression(max_iter=200),
+        "LogReg": LogisticRegression(max_iter=200),
         "Decision Tree": DecisionTreeClassifier(),
         "Random Forest": RandomForestClassifier()
     }
+
+    print("\n===== CLASSIFICATION MODELS =====\n")
 
     for name, model in models.items():
 
         model.fit(X_train, y_train)
         preds = model.predict(X_test)
 
-        print(f"{name} Accuracy:", accuracy_score(y_test, preds))
+        acc = accuracy_score(y_test, preds)
+
+        print(f"{name} Accuracy: {acc:.2f}")
+        results[name] = acc
+
+    return results
 
 
-# ---------------- REGRESSION ----------------
+# ---------- REGRESSION ----------
 def regression_models(X, y):
 
     print("\n===== REGRESSION MODELS =====\n")
@@ -123,41 +143,29 @@ def regression_models(X, y):
         print(f"  R2 : {r2:.2f}")
 
 
-# ---------------- CROSS VALIDATION ----------------
-def cross_validation_models(X, y):
-
-    print("\n===== CROSS VALIDATION =====\n")
-
-    model1 = LogisticRegression(max_iter=200)
-    model2 = RandomForestClassifier()
-
-    scores1 = cross_val_score(model1, X, y, cv=5)
-    scores2 = cross_val_score(model2, X, y, cv=5)
-
-    print("Logistic Regression CV Mean:", scores1.mean())
-    print("Random Forest CV Mean     :", scores2.mean())
-
-
-# ---------------- MAIN ----------------
+# ---------- MAIN ----------
 def main():
 
     with open("test_data.json", "r") as f:
         data = json.load(f)
 
-    # Step 1: LLM Evaluation
-    y = llm_evaluation(data)
+    y, llm_acc, cm = llm_evaluation(data)
 
-    # Step 2: Create dummy features (since MCQ has no features)
     X = np.arange(len(y)).reshape(-1, 1)
 
-    # Step 3: Classification
-    classification_models(X, y)
+    results = classification_models(X, y)
 
-    # Step 4: Regression
     regression_models(X, y)
 
-    # Step 5: Cross-validation
-    cross_validation_models(X, y)
+    # GRAPH POPUPS
+    plot_accuracy(
+        llm_acc,
+        results["LogReg"],
+        results["Decision Tree"],
+        results["Random Forest"]
+    )
+
+    plot_confusion_matrix(cm)
 
 
 if __name__ == "__main__":
