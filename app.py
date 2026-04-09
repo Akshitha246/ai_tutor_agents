@@ -200,7 +200,7 @@ elif menu == "Quiz":
                     tooltip=["Question", "Result"]
                 )
 
-                st.subheader("📈 Performance Spike Graph")
+                st.subheader("📈 Learning Progress Graph")
                 st.altair_chart(chart, use_container_width=True)
 
 # ---------------- CHAT ----------------
