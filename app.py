@@ -1,4 +1,6 @@
 import streamlit as st
+import pandas as pd
+import altair as alt
 
 from agents.tutor_agent import explain_topic
 from agents.quiz_agent import generate_quiz
@@ -37,6 +39,10 @@ if "show_next" not in st.session_state:
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
 
+# ✅ NEW: store per-question correctness (for spike graph)
+if "question_history" not in st.session_state:
+    st.session_state.question_history = []
+
 # ---------------- SIDEBAR ----------------
 menu = st.sidebar.selectbox(
     "Navigation",
@@ -65,6 +71,7 @@ elif menu == "Quiz":
         st.session_state.submitted = False
         st.session_state.last_eval = None
         st.session_state.show_next = False
+        st.session_state.question_history = []  # reset graph
 
         memory.total_questions = 0
         memory.correct_answers = 0
@@ -82,6 +89,7 @@ elif menu == "Quiz":
         st.session_state.submitted = False
         st.session_state.last_eval = None
         st.session_state.show_next = False
+        st.session_state.question_history = []  # reset graph
 
         memory.total_questions = 0
         memory.correct_answers = 0
@@ -93,10 +101,8 @@ elif menu == "Quiz":
 
         if q_index < total_q:
 
-            # Progress bar
             st.progress(q_index / total_q, text=f"Question {q_index + 1} of {total_q}")
 
-            # Live score
             stats_live = memory.stats()
             st.info(f"Score: {stats_live['correct']} / {stats_live['attempted']}")
 
@@ -112,9 +118,7 @@ elif menu == "Quiz":
                 key=f"answer_{q_index}"
             )
 
-            # Submit
             if not st.session_state.submitted:
-
                 if st.button("Submit Answer"):
 
                     ai_eval = evaluate_answer(question_only, user_answer)
@@ -123,7 +127,6 @@ elif menu == "Quiz":
                     st.session_state.submitted = True
                     st.session_state.show_next = False
 
-            # Evaluation
             if st.session_state.submitted and st.session_state.last_eval:
 
                 ai_eval = st.session_state.last_eval
@@ -133,24 +136,19 @@ elif menu == "Quiz":
                 st.write(f"Confidence: {ai_eval['confidence']}")
                 st.write(f"Explanation: {ai_eval['explanation']}")
 
-                # AI Feedback
                 ai_feedback = give_feedback(topic, ai_eval)
                 st.subheader("📘 AI Feedback")
                 st.write(ai_feedback)
 
-                # Smart HITL
                 if ai_eval["confidence"] in ["Low", "Medium"]:
-
                     hitl = human_in_loop_evaluation(
                         question_only,
                         user_answer,
                         ai_eval,
                         q_index
                     )
-
                     final_result = hitl["result"]
                     final_feedback = hitl["feedback"]
-
                 else:
                     st.success("High confidence — auto accepted")
                     final_result = ai_eval["result"]
@@ -164,11 +162,12 @@ elif menu == "Quiz":
 
                 correct = final_result == "Correct"
 
+                # ✅ store spike data
                 if not st.session_state.show_next:
                     memory.update(correct)
+                    st.session_state.question_history.append(1 if correct else 0)
                     st.session_state.show_next = True
 
-                # Next
                 if st.button("➡️ Next Question"):
 
                     st.session_state.current_question += 1
@@ -188,15 +187,21 @@ elif menu == "Quiz":
             st.write(f"Total: {stats['attempted']}")
             st.write(f"Accuracy: {stats['accuracy']}%")
 
-            if stats["accuracy"] >= 80:
-                st.success("Excellent performance!")
-            elif stats["accuracy"] >= 50:
-                st.warning("Good, but can improve.")
-            else:
-                st.error("Needs improvement. Review concepts.")
+            # ✅ Spike graph here too
+            if st.session_state.question_history:
+                df = pd.DataFrame({
+                    "Question": list(range(1, len(st.session_state.question_history) + 1)),
+                    "Result": st.session_state.question_history
+                })
 
-            if stats["accuracy"] < 60:
-                st.info("Suggestion: Revise this topic or use Chat Tutor.")
+                chart = alt.Chart(df).mark_line(point=True).encode(
+                    x="Question:Q",
+                    y=alt.Y("Result:Q", scale=alt.Scale(domain=[0, 1])),
+                    tooltip=["Question", "Result"]
+                )
+
+                st.subheader("📈 Performance Spike Graph")
+                st.altair_chart(chart, use_container_width=True)
 
 # ---------------- CHAT ----------------
 elif menu == "Chat Tutor":
@@ -232,3 +237,19 @@ elif menu == "Progress":
 
     with col3:
         st.metric("Accuracy (%)", stats["accuracy"])
+
+    # ✅ Spike graph in Progress tab
+    if st.session_state.question_history:
+        df = pd.DataFrame({
+            "Question": list(range(1, len(st.session_state.question_history) + 1)),
+            "Result": st.session_state.question_history
+        })
+
+        chart = alt.Chart(df).mark_line(point=True).encode(
+            x="Question:Q",
+            y=alt.Y("Result:Q", scale=alt.Scale(domain=[0, 1])),
+            tooltip=["Question", "Result"]
+        )
+
+        st.subheader("📈 Overall Performance (Spike Graph)")
+        st.altair_chart(chart, use_container_width=True)
